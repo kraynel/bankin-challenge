@@ -2,6 +2,7 @@ const puppeteer = require("puppeteer");
 
 const TIMEOUT = 10000;
 const HEADLESS = true;
+const DEBUG = process.env.DEBUG === "true";
 
 const getTextContent = async elementHandle => {
   const jsHandle = await elementHandle.getProperty("textContent");
@@ -13,7 +14,12 @@ const parseRow = async row => {
   const account = await getTextContent(accountHandle);
   const transaction = await getTextContent(transactionHandle);
   const amount = await getTextContent(amountHandle);
-  return { account, transaction, amount };
+  return {
+    account,
+    transaction,
+    amount: Number(amount.slice(0, -1)),
+    currency: "€"
+  };
 };
 
 const extractFromFrame = async frame => {
@@ -27,45 +33,52 @@ const extractFromMain = async page => {
 };
 
 (async () => {
-  console.log("START");
   const browser = await puppeteer.launch({ headless: HEADLESS });
   const page = await browser.newPage();
-  console.log("NEW PAGE LOADED");
-
-  page.on("dialog", async dialog => {
-    await dialog.dismiss();
-    await page.click("#btnGenerate");
-  });
 
   let skip = 0;
   let transactions = [];
-  let shouldEnd = false;
+  let loadMore = true;
+  let stopMainWait = null;
+
+  page.on("dialog", async dialog => {
+    await dialog.dismiss();
+    // Must wait for the eventListener to be registered
+    // TODO: Find a better solution
+    await page.waitFor(500);
+    await page.click("#btnGenerate");
+  });
+
+  page.on("frameattached", async frame => {
+    const transactionsValues = await extractFromFrame(frame);
+    if (stopMainWait) return stopMainWait(transactionsValues);
+  });
 
   do {
-    let stopMainWait = null;
     const stopMainPromise = new Promise(resolve => {
       stopMainWait = resolve;
     });
-
-    page.once("frameattached", async frame => {
-      const transactionsValues = await extractFromFrame(frame);
-      stopMainWait(transactionsValues);
-    });
-
     await page.goto(
       "https://web.bankin.com/challenge/index.html?start=" + skip
     );
+
+    if (DEBUG) {
+      const result = await page.evaluate(() => {
+        return { start, failmode, hasiframe, slowmode };
+      });
+      console.log("Round vals", result);
+    }
+
     const transactionsValues = await Promise.race([
       extractFromMain(page),
       stopMainPromise
     ]);
 
-    shouldEnd = transactionsValues.length === 0;
+    loadMore = transactionsValues.length > 0;
     skip += transactionsValues.length;
     transactions.push(...transactionsValues);
-
-    console.log("Got more results", skip);
-  } while (!shouldEnd);
+    DEBUG && console.log("Got more results", skip);
+  } while (loadMore);
 
   console.log(transactions);
   await browser.close();
