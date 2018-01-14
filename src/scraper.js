@@ -36,10 +36,12 @@ const scraper = async (
   firstResult = 0,
   lastResult = Number.MAX_SAFE_INTEGER
 ) => {
+  // Open a new tab
   const page = await browser.newPage();
 
+  // Initialize the loop
+  const allTransactions = [];
   let skip = firstResult;
-  let transactions = [];
   let loadMore = true;
   let stopMainWait = null;
 
@@ -56,32 +58,39 @@ const scraper = async (
 
   // Event triggered when an iframe is loaded
   page.on("frameattached", async frame => {
-    const transactionsValues = await extractFromFrame(frame);
-    if (stopMainWait) return stopMainWait(transactionsValues);
+    const transactions = await extractFromFrame(frame);
+    if (stopMainWait) return stopMainWait(transactions);
   });
 
+  // While there are more transactions to load
   while (loadMore) {
+    // Initialize a promise.
+    // Will be resolve with transactions from the iframe if they exist
     const stopMainPromise = new Promise(resolve => {
       stopMainWait = resolve;
     });
+
+    // Navigate to the page, with the correct start parameter
     await page.goto(
       "https://web.bankin.com/challenge/index.html?start=" + skip
     );
 
-    const transactionsValues = await Promise.race([
+    // Race between the apparition of table in the main frame or an iframe
+    const transactions = await Promise.race([
       extractFromFrame(page),
       stopMainPromise
     ]);
 
-    console.log(
-      `Transactions ${skip} - ${skip + transactionsValues.length} loaded`
-    );
-    skip += transactionsValues.length;
-    loadMore = transactionsValues.length > 0 && skip < lastResult;
-    transactions.push(...transactionsValues);
+    console.log(`Transactions ${skip} - ${skip + transactions.length} loaded`);
+    // Append transaction to the main array
+    allTransactions.push(...transactions);
+
+    // Update variables for next loop
+    skip += transactions.length;
+    loadMore = transactions.length > 0 && skip < lastResult;
   }
 
-  return transactions;
+  return allTransactions;
 };
 
 module.exports = scraper;
