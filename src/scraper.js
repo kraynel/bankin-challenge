@@ -72,7 +72,7 @@ const scraper = async (
 
     // Navigate to the page, with the correct start parameter
     await page.goto(
-      "https://web.bankin.com/challenge/index.html?start=" + skip
+      `https://web.bankin.com/challenge/index.html?start=${skip}`
     );
 
     // Race between the apparition of table in the main frame or an iframe
